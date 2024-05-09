@@ -3,10 +3,12 @@
 namespace Bl\FatooraZatca\Services\Invoice;
 
 use Bl\FatooraZatca\Actions\GetXmlFileAction;
+use Bl\FatooraZatca\Helpers\ConfigHelper;
 use Bl\FatooraZatca\Helpers\InvoiceHelper;
 use Bl\FatooraZatca\Transformers\PriceFormat;
 use Bl\FatooraZatca\Transformers\PublicKey;
 use phpseclib3\File\X509;
+use DOMDocument;
 
 class SignInvoiceService
 {
@@ -124,6 +126,18 @@ class SignInvoiceService
         $this->certificateOutput = $x509->loadX509($csrX509);
 
         $this->issuerName        = $x509->getIssuerDN(X509::DN_STRING);
+        $issuerNameArray = $x509->getIssuerDN(X509::DN_ARRAY)['rdnSequence'];
+
+        if(count($issuerNameArray) === 4) {
+            $CN = $issuerNameArray[3][0]['value']['printableString'];
+            $DC1 = $issuerNameArray[2][0]['value']['ia5String'];
+            $DC2 = $issuerNameArray[1][0]['value']['ia5String'];
+            $DC3 = $issuerNameArray[0][0]['value']['ia5String'];
+            $this->issuerName = "CN={$CN}, DC={$DC1}, DC={$DC2}, DC={$DC3}";
+        }
+        else {
+            $this->issuerName = $x509->getIssuerDN(X509::DN_STRING);
+        }
 
         $this->publicKey         = (new PublicKey)->transform($x509->getPublicKey());
 
@@ -165,6 +179,7 @@ class SignInvoiceService
         list($signedProperties, $signedPropertiesHash) = $this->getSignedProperties();
 
         $xml = str_replace('SET_SIGNED_PROPERTIES_HASH', $signedPropertiesHash, $xml);
+        $xml = str_replace('SET_SIGNED_PROPERTIES_HASH', $this->getSignedPropertiesHash(), $xml);
 
         $xml = str_replace('SET_DIGITAL_SIGNATURE', $this->digitalSignature, $xml);
 
@@ -194,12 +209,40 @@ class SignInvoiceService
 
         $xml = str_replace('SET_CERTIFICATE_SERIAL_NUMBER', $issuerSerialNumber, $xml);
 
+        return $xml;
+    }
+
+    /**
+     * get the signed properties hash.
+     *
+     * @return string
+     */
+    protected function getSignedPropertiesHash(): string
+    {
+        $xml = GetXmlFileAction::handle('xml_ubl_signed_properties_hash');
+
+        $xml = str_replace('SET_SIGN_TIMESTAMP', (new InvoiceHelper)->getSigningTime($this->invoice), $xml);
+
         return [
 
             $xml,
 
             (new InvoiceHelper)->getHashSignedProperity($xml)
         ];
+        $issuerSerialNumber = $this->certificateOutput['tbsCertificate']['serialNumber']->toString();
+
+        $xml = str_replace('SET_CERTIFICATE_SERIAL_NUMBER', $issuerSerialNumber, $xml);
+
+        // hash the signed properties...
+        // $signedProperties = unpack('H*', $xml)['1'];
+        // $signedProperties = hash('sha256', $signedProperties);
+
+        $doc = new DOMDocument();
+        $doc->preserveWhiteSpace = true;
+        $doc->loadXML($xml);
+        $xml = $doc->saveXML($doc->documentElement);
+
+        return base64_encode(hash('sha256', $xml));
     }
 
     /**

@@ -28,11 +28,13 @@ class HandleResponseAction
             throw new Exception('Unauthoroized zatca settings!');
 
         }
-
-        throw new Exception(
-            empty($response)
-            ? 'Unhandeled zatca error exception!'
-            : json_encode($response)
-        );
+        else {
+            if(! empty($response)) {
+                throw new Exception(json_encode($response));
+            }
+            else {
+                throw new Exception('Unhandeled zatca error exception!');
+            }
+        }
     }
 }
